@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>OmniPOS Apex v5.0 Elite</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        :root {
+            --bg: #000000; --surface: #1c1c1e; --accent: #ff9500; --accent-dark: #cc7600;
+            --text: #ffffff; --text-dim: #8e8e93; --border: #38383a; --danger: #ff453a;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; 
+            background-color: var(--bg); color: var(--text); margin: 0; display: flex; 
+            height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Sidebar Navigation */
+        .sidebar { width: 75px; background: var(--surface); display: flex; flex-direction: column; align-items: center; padding: 30px 0; gap: 35px; border-right: 1px solid var(--border); }
+        .nav-icon { color: var(--text-dim); font-size: 24px; cursor: pointer; transition: 0.2s; padding: 12px; border-radius: 14px; }
+        .nav-icon.active { color: var(--accent); background: rgba(255, 149, 0, 0.15); }
+
+        /* Main Viewports */
+        .main-content { flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+        .viewport { display: none; flex-direction: column; height: 100%; animation: fadeIn 0.3s; }
+        .viewport.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .top-bar { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(28,28,30,0.8); backdrop-filter: blur(10px); }
+
+        /* Inventory Grid & Cards */
+        .inventory-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 15px; padding: 20px; }
+        .item-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; cursor: pointer; transition: transform 0.1s; }
+        .item-card:active { transform: scale(0.96); }
+        .item-card img { width: 100%; height: 100px; object-fit: cover; filter: grayscale(20%); }
+        .card-info { padding: 12px; }
+
+        /* Table Design */
+        .table-container { flex: 1; overflow: auto; padding: 15px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--text); }
+        th { background: var(--surface); color: var(--accent); padding: 12px; text-align: left; border-bottom: 2px solid var(--border); position: sticky; top: 0; }
+        td { padding: 10px; border-bottom: 1px solid var(--border); }
+        .t-input { width: 100%; background: transparent; border: 1px solid transparent; color: #fff; padding: 6px; border-radius: 4px; }
+        .t-input:focus { border-color: var(--accent); background: #2c2c2e; outline: none; }
+
+        /* Cart & Void Logic Panel */
+        .cart-panel { width: 380px; background: var(--surface); display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+        .cart-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .cart-list { flex: 1; overflow-y: auto; padding: 15px; }
+        .cart-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .void-btn { color: var(--danger); font-size: 12px; text-transform: uppercase; font-weight: bold; cursor: pointer; padding: 5px; }
+
+        .checkout-box { padding: 25px; border-top: 1px solid var(--border); background: var(--bg); }
+        .input-group { margin-bottom: 12px; }
+        .input-group label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; }
+        .input-group input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: #fff; padding: 12px; border-radius: 10px; box-sizing: border-box; }
+
+        .btn-main { width: 100%; background: var(--accent); color: #000; border: none; padding: 20px; border-radius: 16px; font-weight: 800; font-size: 18px; cursor: pointer; margin-top: 10px; }
+        .btn-cancel { width: 100%; background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 12px; border-radius: 12px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+
+        /* Modals */
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
+        .modal-body { background: var(--surface); padding: 30px; border-radius: 24px; width: 100%; max-width: 450px; border: 1px solid var(--border); }
+
+        @media print {
+            body * { visibility: hidden; }
+            #receipt-p, #receipt-p * { visibility: visible; }
+            #receipt-p { position: absolute; left: 0; top: 0; width: 100%; display: block !important; color: #000; background: #fff; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="sidebar">
+    <div class="nav-icon active" onclick="showTab('tab-pos', this)">🛒</div>
+    <div class="nav-icon" onclick="showTab('tab-inv', this)">📊</div>
+    <div class="nav-icon" onclick="toggleSettings()">⚙️</div>
+</nav>
+
+<div class="main-content">
+    <div id="tab-pos" class="viewport active">
+        <div class="top-bar">
+            <h2 id="h-store" style="color:var(--accent); margin:0;">APEX POS</h2>
+            <button onclick="openItemModal()" style="background:var(--accent); color:#000; border:none; padding:10px 20px; border-radius:10px; font-weight:bold;">+ ADD ITEM</button>
+        </div>
+        <div class="inventory-grid" id="posGrid"></div>
+    </div>
+
+    <div id="tab-inv" class="viewport">
+        <div class="top-bar">
+            <h2>Inventory Editor</h2>
+            <div style="display:flex; gap:10px;">
+                <button onclick="exportCSV()" style="background:var(--surface); color:#fff; border:1px solid var(--border); padding:10px 15px; border-radius:10px;">Export CSV</button>
+                <button onclick="document.getElementById('csvIn').click()" style="background:var(--accent); color:#000; border:none; padding:10px 15px; border-radius:10px;">Import CSV</button>
+                <input type="file" id="csvIn" style="display:none" onchange="importCSV(event)">
+            </div>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>Img</th><th>Code</th><th>Name</th><th>Price</th><th>Stock</th><th>Action</th></tr></thead>
+                <tbody id="invTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="cart-panel">
+    <div class="cart-header">
+        <span style="font-weight:bold; letter-spacing:1px;">TICKET</span>
+        <span id="cartCount" style="background:var(--accent); color:#000; padding:2px 8px; border-radius:20px; font-size:12px;">0</span>
+    </div>
+    <div class="cart-list" id="cartItems"></div>
+    <div class="checkout-box">
+        <div class="input-group"><label>Customer Name</label><input type="text" id="custName"></div>
+        <div class="input-group"><label>Order Reference</label><input type="text" id="custRef"></div>
+        <div style="display:flex; justify-content:space-between; font-size:26px; font-weight:900; margin: 20px 0;">
+            <span style="color:var(--text-dim);">TOTAL</span><span id="grandTotal" style="color:var(--accent);">₱0.00</span>
+        </div>
+        <button class="btn-main" onclick="processSale()">CHARGE & PRINT</button>
+        <button class="btn-cancel" onclick="voidEntireTransaction()">CANCEL TRANSACTION</button>
+    </div>
+</div>
+
+<div class="modal" id="settingsModal">
+    <div class="modal-body">
+        <h3 style="color:var(--accent);">Receipt Branding</h3>
+        <div class="input-group"><label>Store Name</label><input type="text" id="setStore"></div>
+        <div class="input-group"><label>Sub-header (Address)</label><input type="text" id="setSub"></div>
+        <div class="input-group"><label>Footnote</label><input type="text" id="setFoot"></div>
+        <div class="input-group"><label>Next Invoice #</label><input type="number" id="setInv"></div>
+        <button onclick="saveSettings()" class="btn-main">SAVE CONFIG</button>
+        <button onclick="closeModals()" class="btn-cancel" style="border:none;">CLOSE</button>
+    </div>
+</div>
+
+<div class="modal" id="itemModal">
+    <div class="modal-body">
+        <h3 style="color:var(--accent);">Product Setup</h3>
+        <div class="input-group"><label>Image File</label><input type="file" id="m-img" accept="image/*"></div>
+        <div class="input-group"><label>Code</label><input type="text" id="m-code"></div>
+        <div class="input-group"><label>Item Name</label><input type="text" id="m-name"></div>
+        <div class="input-group"><label>Price</label><input type="number" id="m-price"></div>
+        <div class="input-group"><label>Stock</label><input type="number" id="m-stock"></div>
+        <button onclick="saveNewItem()" class="btn-main">ADD PRODUCT</button>
+        <button onclick="closeModals()" class="btn-cancel" style="border:none;">CANCEL</button>
+    </div>
+</div>
+
+<div id="receipt-p" style="display:none; padding:40px; font-family:monospace;">
+    <center>
+        <h2 id="r-header">STORE</h2>
+        <p id="r-sub"></p>
+        <p>--------------------------------</p>
+        <div style="text-align:left">
+            <p>INV #: <span id="r-inv"></span></p>
+            <p id="r-cust"></p>
+            <p id="r-extra"></p>
+            <p>DATE: <span id="r-date"></span></p>
+        </div>
+        <p>--------------------------------</p>
+    </center>
+    <div id="r-items"></div>
+    <p>--------------------------------</p>
+    <div style="display:flex; justify-content:space-between; font-weight:bold;"><span>TOTAL</span><span id="r-total"></span></div>
+    <center><p id="r-foot" style="margin-top:30px;"></p></center>
+</div>
+
+<script>
+    let inventory = JSON.parse(localStorage.getItem('apex_v5_inv')) || [];
+    let cart = [];
+    let config = JSON.parse(localStorage.getItem('apex_v5_cfg')) || { name: "Apex Elite", sub: "Elite District, PH", foot: "Premium Service Guaranteed", inv: 1001 };
+
+    function showTab(id, el) {
+        document.querySelectorAll('.viewport').forEach(v => v.classList.remove('active'));
+        document.querySelectorAll('.nav-icon').forEach(n => n.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        el.classList.add('active');
+        id === 'tab-inv' ? renderTable() : renderGrid();
+    }
+
+    function renderGrid() {
+        const grid = document.getElementById('posGrid');
+        grid.innerHTML = inventory.map((item, idx) => `
+            <div class="item-card" onclick="addToCart(${idx})">
+                <img src="${item.img || 'https://via.placeholder.com/150'}">
+                <div class="card-info">
+                    <div style="font-weight:600; font-size:13px; color:var(--text-dim);">${item.name}</div>
+                    <div style="color:var(--accent); font-weight:800; font-size:16px;">₱${parseFloat(item.price).toFixed(2)}</div>
+                    <div style="font-size:10px; color:#555; margin-top:4px;">STOCK: ${item.stock}</div>
+                </div>
+            </div>
+        `).join('');
+        document.getElementById('h-store').innerText = config.name;
+    }
+
+    function renderTable() {
+        const body = document.getElementById('invTableBody');
+        body.innerHTML = inventory.map((item, idx) => `
+            <tr>
+                <td><img src="${item.img}" style="width:35px; height:35px; border-radius:8px; border:1px solid var(--border);"></td>
+                <td><input class="t-input" value="${item.code}" onchange="updateInv(${idx}, 'code', this.value)"></td>
+                <td><input class="t-input" value="${item.name}" onchange="updateInv(${idx}, 'name', this.value)"></td>
+                <td><input class="t-input" type="number" value="${item.price}" onchange="updateInv(${idx}, 'price', this.value)"></td>
+                <td><input class="t-input" type="number" value="${item.stock}" onchange="updateInv(${idx}, 'stock', this.value)"></td>
+                <td><button onclick="inventory.splice(${idx},1); renderTable();" style="color:var(--danger); border:none; background:none;">✕</button></td>
+            </tr>
+        `).join('');
+        localStorage.setItem('apex_v5_inv', JSON.stringify(inventory));
+    }
+
+    function updateInv(idx, k, v) { inventory[idx][k] = (k==='price'||k==='stock')? parseFloat(v) : v; localStorage.setItem('apex_v5_inv', JSON.stringify(inventory)); }
+
+    function addToCart(idx) {
+        if(inventory[idx].stock <= 0) return;
+        const exist = cart.find(c => c.code === inventory[idx].code);
+        if(exist) exist.qty++; else cart.push({...inventory[idx], qty: 1, invIdx: idx});
+        updateCart();
+    }
+
+    // VOID LOGIC
+    function voidItem(idx) {
+        cart.splice(idx, 1);
+        updateCart();
+    }
+
+    function voidEntireTransaction() {
+        if(confirm("Void the entire transaction?")) {
+            cart = [];
+            document.getElementById('custName').value = "";
+            document.getElementById('custRef').value = "";
+            updateCart();
+        }
+    }
+
+    function updateCart() {
+        const list = document.getElementById('cartItems');
+        let total = 0;
+        list.innerHTML = cart.map((i, idx) => {
+            total += (i.price * i.qty);
+            return `<div class="cart-row">
+                <div><strong>${i.name}</strong><br><small>₱${i.price} x ${i.qty}</small></div>
+                <div style="text-align:right">
+                    <div style="font-weight:bold;">₱${(i.price * i.qty).toFixed(2)}</div>
+                    <div class="void-btn" onclick="voidItem(${idx})">Void Item</div>
+                </div>
+            </div>`;
+        }).join('');
+        document.getElementById('grandTotal').innerText = "₱" + total.toLocaleString(undefined, {minimumFractionDigits:2});
+        document.getElementById('cartCount').innerText = cart.length;
+    }
+
+    function processSale() {
+        if(cart.length === 0) return;
+        document.getElementById('r-header').innerText = config.name;
+        document.getElementById('r-sub').innerText = config.sub;
+        document.getElementById('r-inv').innerText = config.inv++;
+        document.getElementById('r-date').innerText = new Date().toLocaleString();
+        document.getElementById('r-cust').innerText = document.getElementById('custName').value ? "CUSTOMER: " + document.getElementById('custName').value : "";
+        document.getElementById('r-extra').innerText = document.getElementById('custRef').value ? "REF: " + document.getElementById('custRef').value : "";
+        document.getElementById('r-list').innerHTML = cart.map(i => `<div style="display:flex; justify-content:space-between; margin:5px 0;"><span>${i.qty}x ${i.name}</span><span>₱${(i.qty*i.price).toFixed(2)}</span></div>`).join('');
+        document.getElementById('r-total').innerText = document.getElementById('grandTotal').innerText;
+        document.getElementById('r-foot').innerText = config.foot;
+
+        cart.forEach(c => inventory[c.invIdx].stock -= c.qty);
+        window.print();
+        cart = []; updateCart(); renderGrid();
+        localStorage.setItem('apex_v5_cfg', JSON.stringify(config));
+        localStorage.setItem('apex_v5_inv', JSON.stringify(inventory));
+    }
+
+    function exportCSV() {
+        let csv = "Code,Name,Price,Stock\n";
+        inventory.forEach(i => csv += `${i.code},${i.name},${i.price},${i.stock}\n`);
+        const b = new Blob([csv], {type:'text/csv'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'Elite_Inventory.csv'; a.click();
+    }
+
+    function importCSV(e) {
+        const r = new FileReader();
+        r.onload = (f) => {
+            const lines = f.target.result.split('\n');
+            const n = [];
+            for(let i=1; i<lines.length; i++){
+                const c = lines[i].split(',');
+                if(c.length>=4) n.push({code:c[0], name:c[1], price:parseFloat(c[2]), stock:parseFloat(c[3]), img:''});
+            }
+            if(confirm("Update Inventory from CSV?")) { inventory = n; renderTable(); }
+        };
+        r.readAsText(e.target.files[0]);
+    }
+
+    function openItemModal() { document.getElementById('itemModal').style.display='flex'; }
+    function toggleSettings() { 
+        document.getElementById('settingsModal').style.display='flex'; 
+        document.getElementById('setStore').value = config.name;
+        document.getElementById('setSub').value = config.sub;
+        document.getElementById('setFoot').value = config.foot;
+        document.getElementById('setInv').value = config.inv;
+    }
+    function closeModals() { document.querySelectorAll('.modal').forEach(m => m.style.display='none'); }
+
+    function saveSettings() {
+        config = { name: document.getElementById('setStore').value, sub: document.getElementById('setSub').value, foot: document.getElementById('setFoot').value, inv: parseInt(document.getElementById('setInv').value) };
+        localStorage.setItem('apex_v5_cfg', JSON.stringify(config));
+        closeModals(); renderGrid();
+    }
+
+    function saveNewItem() {
+        const f = document.getElementById('m-img').files[0];
+        const item = { code: document.getElementById('m-code').value, name: document.getElementById('m-name').value, price: parseFloat(document.getElementById('m-price').value), stock: parseInt(document.getElementById('m-stock').value), img: '' };
+        const p = () => { inventory.push(item); renderGrid(); closeModals(); localStorage.setItem('apex_v5_inv', JSON.stringify(inventory)); };
+        if(f) { const r = new FileReader(); r.onload=(e)=>{item.img=e.target.result; p();}; r.readAsDataURL(f); } else p();
+    }
+
+    window.onload = renderGrid;
+</script>
+</body>
+</html>
